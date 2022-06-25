@@ -1,27 +1,20 @@
-// main.cpp : Defines the entry point for the application.
-
 #include <iostream>
 #include <vector>
 #include <filesystem>
-#include <opencv2/core.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/videoio.hpp>
-#include <opencv2/highgui.hpp>
 #include <set>
-#include <opencv2/core.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/videoio.hpp>
-#include <windows.h>
 #include <iostream>
 #include <string>
 #include <sstream>
 #include <future>
-#include <filesystem>
+#include <windows.h>
 #include <unordered_map>
 #include <unordered_set>
+#include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/videoio.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/videoio.hpp>
 
 using namespace cv;
 using namespace std;
