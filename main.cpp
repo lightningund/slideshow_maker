@@ -16,26 +16,21 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/videoio.hpp>
 
-using namespace cv;
-using namespace std;
-namespace fs = filesystem;
-
-constexpr int FPS = 60;
-constexpr int DWIDTH = 1920;
-constexpr int DHEIGHT = 1080;
-string ROOT_DIR = "D:/#Pictures/#NSFW/ITF/";
-constexpr int IMAGE_LENGTH = 3;
-constexpr int MOVIE_LENGTH = 5;
+#define CODEC_MP42 VideoWriter::fourcc('M', 'P', '4', '2')
 
 typedef unsigned long long int hashtype;
 typedef unsigned short int smallint;
 
-constexpr unsigned int hash_size = 32;
-constexpr unsigned int folder_limit = 1000;
-constexpr unsigned int movie_limit = 10000;
-constexpr float des_width = 1920.0;
-constexpr float des_height = 1080.0;
-constexpr float des_ratio = des_width / des_height;
+using namespace cv;
+using namespace std;
+namespace fs = filesystem;
+
+string ROOT_DIR = "D:/#Pictures/#NSFW/ITF/";
+int img_length = 3, mov_length = 5;
+
+float des_width = 1920.0;
+float des_height = 1080.0;
+float des_ratio = des_width / des_height;
 
 constexpr smallint op_compile = 0;
 constexpr smallint op_recompile = 1;
@@ -47,18 +42,7 @@ constexpr smallint op_rename = 5;
 smallint operation;
 string sourcedir, enddir;
 
-#define CODEC_MP42 VideoWriter::fourcc('M', 'P', '4', '2')
-
 void func_file(fs::directory_entry file, Mat(*f)(Mat));
-
-void apply_user_choice(int operation);
-
-void compile_path();
-void compile_img(VideoWriter writer, fs::directory_entry file);
-Mat crop_img(Mat srcimg);
-Mat resize_img(Mat srcimg);
-Mat rename_img(Mat srcimg);
-void rename_img(fs::directory_entry file);
 
 string intToHex(hashtype w, int hexLen);
 string binaryToHex(string binary);
@@ -71,32 +55,64 @@ Mat resize_img(Mat& img) {
 		cvtColor(img, img, COLOR_BGRA2BGR);
 	}
 
-	if (w == DWIDTH && h == DHEIGHT) return img;
+	if (w == des_width && h == des_height) return img;
 
-	double dr = DWIDTH / (double)DHEIGHT;
-	double r = w / (double)h;
-	int nw = 0, nh = 0;
+	float r = w / (float)h;
+	int nw = des_width, nh = des_height;
 
-	if (r < dr) {
-		nh = DHEIGHT;
-		nw = w * (DHEIGHT / (double)h);
-	} else if (r > dr) {
-		nw = DWIDTH;
-		nh = h * (DWIDTH / (double)w);
+	if (r < des_ratio) {
+		nw = w * (des_height / (float)h);
+	} else if (r > des_ratio) {
+		nh = h * (des_height / (float)w);
 	} else {
-		resize(img, img, Size(DWIDTH, DHEIGHT));
+		resize(img, img, Size(des_width, des_height));
 		return img;
 	}
 
-	double xo = (DWIDTH - nw) / 2.0;
-	double yo = (DHEIGHT - nh) / 2.0;
+	float xo = (des_width - nw) / 2.0;
+	float yo = (des_height - nh) / 2.0;
 
 	resize(img, img, Size(nw, nh));
-	Mat newImg(DHEIGHT, DWIDTH, CV_8UC3);
+	Mat newImg(des_height, des_width, CV_8UC3);
 	Rect roi(xo, yo, nw, nh);
 	img.copyTo(newImg(roi));
 	return newImg;
 }
+
+Mat crop_img(Mat srcimg) {
+	int width = srcimg.cols;
+	int height = srcimg.rows;
+	Mat bigImg = Mat::zeros(height * 2, width * 2, CV_8UC3);
+	Mat insetImg(bigImg, Rect(width / 2, height / 2, width, height));
+	srcimg.copyTo(insetImg);
+	Mat gray;
+	cvtColor(bigImg, gray, COLOR_BGR2GRAY); // Convert the base image into grayscale
+	Mat thresh;
+	threshold(gray, thresh, 5, 255, THRESH_BINARY); // Run the grayscale through a boolean function (essentially)
+	vector<vector<Point>> contours;
+	findContours(thresh, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE); // Find the contours (???)
+	Rect coords(0, 0, width, height);
+	for (int i = 0; i < contours.size(); i++) {
+		vector<Point> cnt = contours[i];
+		Rect bounds = boundingRect(cnt);
+		if (bounds.width > coords.width && bounds.height > coords.height) {
+			coords = bounds;
+		}
+	}
+	Mat crop(bigImg, coords);
+	return crop;
+}
+
+void slideshow_from_folder(string folder);
+void slideshow_from_subfolders(string folder);
+//Turn all images in a folder into a slideshow for each subfolder
+void crop_folder(string folder);
+void crop_subfolders(string folder);
+void resize_folder(string folder);
+void resize_subfolders(string folder);
+void remove_duplicates_from_folder(string folder);
+void remove_duplicates_from_subfolders(string folder);
+void decompile_slideshow(string slideshow, string target);
 
 bool endswith_list(string str, initializer_list<string> lst) {
 	for (string substr : lst) {
@@ -358,56 +374,6 @@ void func_file(fs::directory_entry file, Mat(*f)(Mat)) {
 	} catch (Exception e) { cout << e.msg << endl; }
 }
 
-Mat crop_img(Mat srcimg) {
-	int width = srcimg.cols;
-	int height = srcimg.rows;
-	Mat bigImg = Mat::zeros(height * 2, width * 2, CV_8UC3);
-	Mat insetImg(bigImg, Rect(width / 2, height / 2, width, height));
-	srcimg.copyTo(insetImg);
-	Mat gray;
-	cvtColor(bigImg, gray, COLOR_BGR2GRAY); // Convert the base image into grayscale
-	Mat thresh;
-	threshold(gray, thresh, 5, 255, THRESH_BINARY); // Run the grayscale through a boolean function (essentially)
-	vector<vector<Point>> contours;
-	findContours(thresh, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE); // Find the contours (???)
-	Rect coords(0, 0, width, height);
-	for (int i = 0; i < contours.size(); i++) {
-		vector<Point> cnt = contours[i];
-		Rect bounds = boundingRect(cnt);
-		if (bounds.width > coords.width && bounds.height > coords.height) {
-			coords = bounds;
-		}
-	}
-	Mat crop(bigImg, coords);
-	return crop;
-}
-
-Mat resize_img(Mat srcimg) {
-	int w = srcimg.cols;
-	int h = srcimg.rows;
-	float ratio = (float)w / (float)h;
-
-	float newW = 0, newH = 0;
-
-	if (ratio > des_ratio) {
-		newW = des_width;
-		newH = des_width / ratio;
-	} else {
-		newW = des_height * ratio;
-		newH = des_height;
-	}
-
-	float xoff = (des_width - newW) / 2;
-	float yoff = (des_height - newH) / 2;
-
-	Mat newImg = Mat::zeros(des_height, des_width, CV_8UC3);
-	Mat insetImg(newImg, Rect(xoff, yoff, newW, newH));
-	Mat resImg;
-	resize(srcimg, resImg, Size(newW, newH));
-	resImg.copyTo(insetImg);
-	return newImg;
-}
-
 string dhash_img(Mat srcimg) {
 	Mat gray;
 	cvtColor(srcimg, gray, COLOR_BGR2GRAY);
@@ -422,29 +388,17 @@ string dhash_img(Mat srcimg) {
 			hashImg.at<uint>(Point(x, y)) = bigger ? 255 : 0;
 		}
 	}
-	imshow("gray", smallGray);
-	waitKey(0);
+
 	imwrite("D:/" + to_string(rand() % 1000) + ".png", hashImg);
 	return hash;
-}
-
-void rename_img(fs::directory_entry file) {
-	string filepath = file.path().string();
-	string folderpath = file.path().parent_path().string();
-	string ext = file.path().extension().string();
-	try {
-		string hash = binaryToHex(dhash_img(imread(filepath)));
-		string newname = folderpath + "/" + hash + ext;
-		rename(filepath.c_str(), newname.c_str());
-		cout << hash << "\r";
-	} catch (Exception e) { cout << e.msg << endl; }
 }
 
 string intToHex(hashtype w, int hexLen) {
 	static const char* digits = "0123456789ABCDEF";
 	string rc(hexLen, '0');
-	for (int i = 0, j = (hexLen - 1) * 4; i < hexLen; ++i, j -= 4)
+	for (int i = 0, j = (hexLen - 1) * 4; i < hexLen; ++ i, j -= 4) {
 		rc[i] = digits[(w >> j) & 0x0f];
+	}
 	return rc;
 }
 
@@ -452,20 +406,10 @@ string binaryToHex(string bin) {
 	static const char* digits = "0123456789ABCDEF";
 	string hex = "";
 	int startoff = 4 - bin.length() % 4;
-	for (int i = startoff; i < bin.length(); i += 4)
+	for (int i = startoff; i < bin.length(); i += 4) {
 		hex += digits[stoi(bin.substr(i, 4))];
+	}
 	return hex;
-}
-
-int main() {
-
-	/*for (const auto& file : fs::directory_iterator(ROOT_DIR)) {
-		make_movie(file.path());
-	}*/
-
-	make_movie(ROOT_DIR + "Abigail");
-
-	return 0;
 }
 
 int main(int argc, char* argv[]) {
