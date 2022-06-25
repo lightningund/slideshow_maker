@@ -32,23 +32,51 @@ float des_width = 1920.0;
 float des_height = 1080.0;
 float des_ratio = des_width / des_height;
 
-constexpr smallint op_compile = 0;
-constexpr smallint op_recompile = 1;
-constexpr smallint op_uncompile = 2;
-constexpr smallint op_autocrop = 3;
-constexpr smallint op_resize = 4;
-constexpr smallint op_rename = 5;
 
 smallint operation;
 string sourcedir, enddir;
 
 void func_file(fs::directory_entry file, Mat(*f)(Mat));
 
-string intToHex(hashtype w, int hexLen);
-string binaryToHex(string binary);
-string dhash_img(Mat srcimg);
+string dhash_img(Mat srcimg) {
+	Mat gray;
+	cvtColor(srcimg, gray, COLOR_BGR2GRAY);
+	Mat smallGray;
+	resize(gray, smallGray, Size(hash_size + 1, hash_size));
+	Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
+	string hash = "";
+	for (int y = 0; y < hash_size; y++) {
+		for (int x = 0; x < hash_size; x++) {
+			bool bigger = smallGray.at<uint>(x, y) > smallGray.at<uint>(x + 1, y);
+			hash += bigger ? "1" : "0";
+			hashImg.at<uint>(Point(x, y)) = bigger ? 255 : 0;
+		}
+	}
 
-Mat resize_img(Mat& img) {
+	imwrite("D:/" + to_string(rand() % 1000) + ".png", hashImg);
+	return hash;
+}
+
+string intToHex(hashtype w, int hexLen) {
+	static const char* digits = "0123456789ABCDEF";
+	string rc(hexLen, '0');
+	for (int i = 0, j = (hexLen - 1) * 4; i < hexLen; ++i, j -= 4) {
+		rc[i] = digits[(w >> j) & 0x0f];
+	}
+	return rc;
+}
+
+string binaryToHex(string bin) {
+	static const char* digits = "0123456789ABCDEF";
+	string hex = "";
+	int startoff = 4 - bin.length() % 4;
+	for (int i = startoff; i < bin.length(); i += 4) {
+		hex += digits[stoi(bin.substr(i, 4))];
+	}
+	return hex;
+}
+
+Mat resize_img(Mat img) {
 	int h = img.rows, w = img.cols;
 
 	if (img.channels() == 4) {
@@ -79,6 +107,11 @@ Mat resize_img(Mat& img) {
 	return newImg;
 }
 
+void resize_file(fs::directory_entry file) {
+	string filepath = file.path().string();
+	imwrite(filepath, resize_img(imread(filepath)));
+}
+
 Mat crop_img(Mat srcimg) {
 	int width = srcimg.cols;
 	int height = srcimg.rows;
@@ -92,7 +125,7 @@ Mat crop_img(Mat srcimg) {
 	vector<vector<Point>> contours;
 	findContours(thresh, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE); // Find the contours (???)
 	Rect coords(0, 0, width, height);
-	for (int i = 0; i < contours.size(); i++) {
+	for (int i = 0; i < contours.size(); i ++) {
 		vector<Point> cnt = contours[i];
 		Rect bounds = boundingRect(cnt);
 		if (bounds.width > coords.width && bounds.height > coords.height) {
@@ -101,6 +134,11 @@ Mat crop_img(Mat srcimg) {
 	}
 	Mat crop(bigImg, coords);
 	return crop;
+}
+
+void crop_file(fs::directory_entry file) {
+	string filepath = file.path().string();
+	imwrite(filepath, crop_img(imread(filepath)));
 }
 
 void slideshow_from_folder(string folder);
@@ -153,9 +191,9 @@ void add_movie(VideoWriter& writer, string file) {
 
 	int total_added_frames = 0;
 	while (total_added_frames < FPS * MOVIE_LENGTH) {
-		for (int i = 0; i < TOTAL_LENGTH * FPS; i++) {
+		for (int i = 0; i < TOTAL_LENGTH * FPS; i ++) {
 			writer.write(frames[int(i * SOURCE_FPS / FPS)]);
-			total_added_frames++;
+			total_added_frames ++;
 		}
 	}
 
@@ -210,10 +248,10 @@ void compile_path() {
 	for (fs::directory_entry file : fs::recursive_directory_iterator(sourcedir)) {
 		compile_img(writer, file);
 		cout << movies << "-" << loops << "\r";
-		loops++;
+		loops ++;
 
 		if (loops >= movie_limit) {
-			movies++;
+			movies ++;
 			loops = 0;
 			writer.release();
 			writer.open(enddir + to_string(movies) + ".avi", CODEC_MP42, 1, Size(1920, 1080));
@@ -255,10 +293,10 @@ void recompile_path() {
 
 					cout << loops << "\r";
 
-					loops++;
+					loops ++;
 
 					if (loops >= movie_limit) {
-						movies++;
+						movies ++;
 						loops = 0;
 						writer.release();
 						writer.open(enddir + to_string(movies) + ".avi", CODEC_MP42, 1, Size(1920, 1080), true);
@@ -313,10 +351,10 @@ void apply_user_choice(int operation) {
 
 				cap.read(frame);
 
-				frames++;
+				frames ++;
 				if (frames >= folder_limit) {
 					frames = 0;
-					folders++;
+					folders ++;
 					string folder = enddir + to_string(folders) + "/";
 					try { CreateDirectoryA(folder.c_str(), NULL); } catch (const exception&) {}
 				}
@@ -365,51 +403,15 @@ void apply_user_choice(int operation) {
 	}
 }
 
-void func_file(fs::directory_entry file, Mat(*f)(Mat)) {
-	string filepath = file.path().string();
-	cout << filepath << "\r";
-	try {
-		Mat img = imread(filepath);
-		imwrite(filepath, f(img));
-	} catch (Exception e) { cout << e.msg << endl; }
-}
-
-string dhash_img(Mat srcimg) {
-	Mat gray;
-	cvtColor(srcimg, gray, COLOR_BGR2GRAY);
-	Mat smallGray;
-	resize(gray, smallGray, Size(hash_size + 1, hash_size));
-	Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
-	string hash = "";
-	for (int y = 0; y < hash_size; y++) {
-		for (int x = 0; x < hash_size; x++) {
-			bool bigger = smallGray.at<uint>(x, y) > smallGray.at<uint>(x + 1, y);
-			hash += bigger ? "1" : "0";
-			hashImg.at<uint>(Point(x, y)) = bigger ? 255 : 0;
-		}
+void crop_folder(string folder) {
+	vector<future<void>> futures;
+	for (fs::directory_entry file : fs::directory_iterator(sourcedir)) {
+		futures.push_back(async(crop_file, file));
 	}
 
-	imwrite("D:/" + to_string(rand() % 1000) + ".png", hashImg);
-	return hash;
-}
-
-string intToHex(hashtype w, int hexLen) {
-	static const char* digits = "0123456789ABCDEF";
-	string rc(hexLen, '0');
-	for (int i = 0, j = (hexLen - 1) * 4; i < hexLen; ++ i, j -= 4) {
-		rc[i] = digits[(w >> j) & 0x0f];
+	for (auto& e : futures) {
+		e.get();
 	}
-	return rc;
-}
-
-string binaryToHex(string bin) {
-	static const char* digits = "0123456789ABCDEF";
-	string hex = "";
-	int startoff = 4 - bin.length() % 4;
-	for (int i = startoff; i < bin.length(); i += 4) {
-		hex += digits[stoi(bin.substr(i, 4))];
-	}
-	return hex;
 }
 
 int main(int argc, char* argv[]) {
