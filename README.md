@@ -14,10 +14,10 @@ Remove all duplicate images in all subfolders\
 Decompile a slideshow into individual frames
 
 ### Flags:
-**-m:** Mode (required)\
-**-i:** Input folder (required)\
-**-r:** Apply recursively to subfolders (`UB` with creation of slideshows)\
-**-o:** Output folder (Recreates exactly what it would do but somewhere else to prevent overwriting) (required with decompilation of slideshows)\
-**-R:** Resolution from a defined list or as custom (default: 1920x1080)\
-**--image-length:** How many seconds each image should remain on screen (default: 3)\
-**--video-length:** The minimum length of time a video should be on screen (default: 5)
+**-m, --mode:** Mode (default: compile)\
+**-i, --input:** Input folder (required)\
+**-r, --recurse:** Apply recursively to subfolders (`UB` with creation of slideshows)\
+**-o, --output:** Output folder (Recreates exactly what it would do but somewhere else to prevent overwriting) (required with decompilation of slideshows)\
+**-R, --res:** Resolution from a defined list or as custom (default: 1920x1080)\
+**-il, --image-length:** How many seconds each image should remain on screen (default: 3)\
+**-vl, --video-length:** The minimum length of time a video should be on screen (default: 5)

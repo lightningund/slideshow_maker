@@ -2,7 +2,6 @@
 #include <vector>
 #include <filesystem>
 #include <set>
-#include <iostream>
 #include <string>
 #include <sstream>
 #include <future>
@@ -15,6 +14,7 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/videoio.hpp>
+#include <argparse/argparse.hpp>
 
 #define CODEC_MP42 VideoWriter::fourcc('M', 'P', '4', '2')
 
@@ -26,35 +26,23 @@ using namespace std;
 namespace fs = filesystem;
 
 string ROOT_DIR = "D:/#Pictures/#NSFW/ITF/";
-int img_length = 3, mov_length = 5;
+int img_length = 3, anim_length = 5;
 
 float des_width = 1920.0;
 float des_height = 1080.0;
 float des_ratio = des_width / des_height;
-
+int hash_size = 128;
 
 smallint operation;
 string sourcedir, enddir;
 
-void func_file(fs::directory_entry file, Mat(*f)(Mat));
-
-string dhash_img(Mat srcimg) {
-	Mat gray;
-	cvtColor(srcimg, gray, COLOR_BGR2GRAY);
-	Mat smallGray;
-	resize(gray, smallGray, Size(hash_size + 1, hash_size));
-	Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
-	string hash = "";
-	for (int y = 0; y < hash_size; y++) {
-		for (int x = 0; x < hash_size; x++) {
-			bool bigger = smallGray.at<uint>(x, y) > smallGray.at<uint>(x + 1, y);
-			hash += bigger ? "1" : "0";
-			hashImg.at<uint>(Point(x, y)) = bigger ? 255 : 0;
-		}
+string int_to_binary_string(int num) {
+	string binary = "";
+	for (int mask = 1; mask < num; mask <<= 1) {
+		binary = ((mask & num) ? "1" : "0") + binary;
 	}
 
-	imwrite("D:/" + to_string(rand() % 1000) + ".png", hashImg);
-	return hash;
+	return binary;
 }
 
 string intToHex(hashtype w, int hexLen) {
@@ -74,6 +62,44 @@ string binaryToHex(string bin) {
 		hex += digits[stoi(bin.substr(i, 4))];
 	}
 	return hex;
+}
+
+string dhash_img(Mat src_img, string save_name) {
+	Mat gray;
+	cvtColor(src_img, gray, COLOR_BGR2GRAY);
+	Mat smallGray;
+	resize(gray, smallGray, Size(hash_size + 1, hash_size));
+	Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
+	int hash = 0;
+	for (int y = 0; y < hash_size; y++) {
+		for (int x = 0; x < hash_size; x++) {
+			bool bigger = smallGray.at<uint>(x, y) > smallGray.at<uint>(x + 1, y);
+			hash += bigger ? 1 : 0;
+			hash <<= 1;
+			hashImg.at<uint>(Point(x, y)) = bigger ? 255 : 0;
+		}
+	}
+
+	imwrite(save_name, hashImg);
+	return int_to_binary_string(hash);
+}
+
+string dhash_img(Mat src_img) {
+	Mat gray;
+	cvtColor(src_img, gray, COLOR_BGR2GRAY);
+	Mat smallGray;
+	resize(gray, smallGray, Size(hash_size + 1, hash_size));
+	Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
+	string hash = "";
+	for (int y = 0; y < hash_size; y++) {
+		for (int x = 0; x < hash_size; x++) {
+			bool bigger = smallGray.at<uint>(x, y) > smallGray.at<uint>(x + 1, y);
+			hash += bigger ? "1" : "0";
+			hashImg.at<uint>(Point(x, y)) = bigger ? 255 : 0;
+		}
+	}
+
+	return hash;
 }
 
 Mat resize_img(Mat img) {
@@ -112,27 +138,28 @@ void resize_file(fs::directory_entry file) {
 	imwrite(filepath, resize_img(imread(filepath)));
 }
 
-Mat crop_img(Mat srcimg) {
-	int width = srcimg.cols;
-	int height = srcimg.rows;
-	Mat bigImg = Mat::zeros(height * 2, width * 2, CV_8UC3);
-	Mat insetImg(bigImg, Rect(width / 2, height / 2, width, height));
-	srcimg.copyTo(insetImg);
+Mat crop_img(Mat src_img) {
+	int width = src_img.cols;
+	int height = src_img.rows;
+	Mat big_img = Mat::zeros(height + 2, width + 2, CV_8UC3);
+	Mat inset_img(big_img, Rect(width / 2, height / 2, width, height));
+	src_img.copyTo(inset_img);
 	Mat gray;
-	cvtColor(bigImg, gray, COLOR_BGR2GRAY); // Convert the base image into grayscale
+	cvtColor(big_img, gray, COLOR_BGR2GRAY); // Convert the base image into grayscale
 	Mat thresh;
 	threshold(gray, thresh, 5, 255, THRESH_BINARY); // Run the grayscale through a boolean function (essentially)
 	vector<vector<Point>> contours;
 	findContours(thresh, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE); // Find the contours (???)
 	Rect coords(0, 0, width, height);
-	for (int i = 0; i < contours.size(); i ++) {
+	for (int i = 0; i < contours.size(); i++) {
 		vector<Point> cnt = contours[i];
 		Rect bounds = boundingRect(cnt);
 		if (bounds.width > coords.width && bounds.height > coords.height) {
 			coords = bounds;
 		}
 	}
-	Mat crop(bigImg, coords);
+
+	Mat crop(big_img, coords);
 	return crop;
 }
 
@@ -140,17 +167,6 @@ void crop_file(fs::directory_entry file) {
 	string filepath = file.path().string();
 	imwrite(filepath, crop_img(imread(filepath)));
 }
-
-void slideshow_from_folder(string folder);
-void slideshow_from_subfolders(string folder);
-//Turn all images in a folder into a slideshow for each subfolder
-void crop_folder(string folder);
-void crop_subfolders(string folder);
-void resize_folder(string folder);
-void resize_subfolders(string folder);
-void remove_duplicates_from_folder(string folder);
-void remove_duplicates_from_subfolders(string folder);
-void decompile_slideshow(string slideshow, string target);
 
 bool endswith_list(string str, initializer_list<string> lst) {
 	for (string substr : lst) {
@@ -167,6 +183,17 @@ bool file_is_anim(fs::path file) {
 	return (set<string>{ ".mov", ".mp4", ".avi" }.contains(file.extension().string()));
 }
 
+void slideshow_from_folder(string folder);
+void slideshow_from_subfolders(string folder);
+//Turn all images in a folder into a slideshow for each subfolder
+void crop_folder(string folder);
+void crop_subfolders(string folder);
+void resize_folder(string folder);
+void resize_subfolders(string folder);
+void remove_duplicates_from_folder(string folder);
+void remove_duplicates_from_subfolders(string folder);
+void decompile_slideshow(string slideshow, string target);
+
 void add_image_for_length(VideoWriter& writer, const Mat& image) {
 	for (int i = 0; i < IMAGE_LENGTH * FPS; i++) {
 		writer.write(image);
@@ -175,8 +202,8 @@ void add_image_for_length(VideoWriter& writer, const Mat& image) {
 
 void add_movie(VideoWriter& writer, string file) {
 	VideoCapture video(file);
-	double SOURCE_FPS = video.get(CAP_PROP_FPS);
-	double TOTAL_LENGTH = video.get(CAP_PROP_FRAME_COUNT) / SOURCE_FPS;
+	double source_fps = video.get(CAP_PROP_FPS);
+	double total_len = video.get(CAP_PROP_FRAME_COUNT) / source_fps;
 
 	cout << video.get(CAP_PROP_FOURCC) << endl;
 
@@ -191,8 +218,8 @@ void add_movie(VideoWriter& writer, string file) {
 
 	int total_added_frames = 0;
 	while (total_added_frames < FPS * MOVIE_LENGTH) {
-		for (int i = 0; i < TOTAL_LENGTH * FPS; i ++) {
-			writer.write(frames[int(i * SOURCE_FPS / FPS)]);
+		for (int i = 0; i < total_len * FPS; i++) {
+			writer.write(frames[int(i * source_fps / FPS)]);
 			total_added_frames ++;
 		}
 	}
@@ -248,10 +275,10 @@ void compile_path() {
 	for (fs::directory_entry file : fs::recursive_directory_iterator(sourcedir)) {
 		compile_img(writer, file);
 		cout << movies << "-" << loops << "\r";
-		loops ++;
+		loops++;
 
 		if (loops >= movie_limit) {
-			movies ++;
+			movies++;
 			loops = 0;
 			writer.release();
 			writer.open(enddir + to_string(movies) + ".avi", CODEC_MP42, 1, Size(1920, 1080));
@@ -293,10 +320,10 @@ void recompile_path() {
 
 					cout << loops << "\r";
 
-					loops ++;
+					loops++;
 
 					if (loops >= movie_limit) {
-						movies ++;
+						movies++;
 						loops = 0;
 						writer.release();
 						writer.open(enddir + to_string(movies) + ".avi", CODEC_MP42, 1, Size(1920, 1080), true);
@@ -351,10 +378,10 @@ void apply_user_choice(int operation) {
 
 				cap.read(frame);
 
-				frames ++;
+				frames++;
 				if (frames >= folder_limit) {
 					frames = 0;
-					folders ++;
+					folders++;
 					string folder = enddir + to_string(folders) + "/";
 					try { CreateDirectoryA(folder.c_str(), NULL); } catch (const exception&) {}
 				}
@@ -414,36 +441,95 @@ void crop_folder(string folder) {
 	}
 }
 
+void crop_subfolders(string folder) {
+	vector<future<void>> futures;
+	for (fs::directory_entry file : fs::recursive_directory_iterator(sourcedir)) {
+		futures.push_back(async(crop_file, file));
+	}
+
+	for (auto& e : futures) {
+		e.get();
+	}
+}
+
+void resize_folder(string folder) {
+	vector<future<void>> futures;
+	for (fs::directory_entry file : fs::directory_iterator(sourcedir)) {
+		futures.push_back(async(resize_file, file));
+	}
+
+	for (auto& e : futures) {
+		e.get();
+	}
+}
+
+void resize_subfolders(string folder) {
+	vector<future<void>> futures;
+	for (fs::directory_entry file : fs::recursive_directory_iterator(sourcedir)) {
+		futures.push_back(async(resize_file, file));
+	}
+
+	for (auto& e : futures) {
+		e.get();
+	}
+}
+
+enum Mode { Compile, Crop, Resize, Decompile, RemDupes };
+
+Mode mode = Compile;
+
 int main(int argc, char* argv[]) {
-	string movie;
+	argparse::ArgumentParser program("slideshow_maker");
 
-	if (argc < 1) {
-		cout << "What do you want to do? 0: Compile, 1: Recompile, 2: Uncompile, 3: Autocrop, 4: Resize, 5: Rename";
-		cin >> operation;
-	} else {
-		operation = stoi(argv[1]);
+	program.add_argument("-m", "--mode")
+		.help("Specify the operating mode. Default: compile.\n\tcompile: Create slideshow from images\n\tcrop: Crop all images\n\tresize: Resize all images to specified size\n\tdecompile: Split movie into frames\n\tduplicates:Remove all identical images")
+		.default_value(string("compile"));
+	
+	program.add_argument("-i", "--input")
+		.help("Specify absolute path to the input folder")
+		.required();
+	
+	program.add_argument("-r", "--recurse")
+		.help("Whether to run on all images in all subfolders or only the root folder. Default: False")
+		.default_value(false)
+		.implicit_value(true);
+
+	program.add_argument("-o", "--output")
+		.help("Create all the files somewhere else instead. Prevents overwriting if you want to keep the originals");
+	
+	program.add_argument("-il", "--image-length")
+		.help("How many seconds each image should remain on screen. Default: 3")
+		.default_value(3)
+		.scan<'i', int>();
+
+	program.add_argument("-vl", "--video-length")
+		.help("The minimum length of time a video should be on screen. Default: 5")
+		.default_value(5)
+		.scan<'i', int>();
+
+	try {
+		program.parse_args(argc, argv);
+	} catch (const runtime_error& err) {
+		cerr << err.what() << endl;
+		cerr << program;
+		exit(1);
 	}
 
-	if (argc < 2) {
-		cout << "Root Directory:";
-		cin >> sourcedir;
-	} else {
-		sourcedir = argv[2];
+	string mode_arg = program.get("-m");
+
+	if (mode_arg == "compile") {
+		mode = Compile;
+	} else if (mode_arg == "crop") {
+		mode = Crop;
+	} else if (mode_arg == "resize") {
+		mode = Resize;
+	} else if (mode_arg == "decompile") {
+		mode = Decompile;
+	} else if (mode_arg == "duplicates") {
+		mode = RemDupes;
 	}
 
-	if (argc < 3) {
-		cout << "Where are you saving to?";
-		cin >> enddir;
-	} else {
-		enddir = argv[3];
-	}
-
-	Mat(*func)(Mat);
-	void (*onEachFile)(fs::directory_entry);
-
-	cout << operation << endl;
-
-	apply_user_choice(operation);
-
+	img_length = program.get<int>("-il");
+	anim_length = program.get<int>("-vl");
 	return 0;
 }
