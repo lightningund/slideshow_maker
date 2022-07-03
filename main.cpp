@@ -24,7 +24,7 @@ namespace fs = filesystem;
 
 int img_length = 3, anim_length = 5;
 
-int des_width = 1920, des_height = 1080, folder_limit = 1000;
+int des_width = 1920, des_height = 1080;
 float des_ratio = des_width / (float)des_height;
 int hash_size = 64, fps = 1;
 
@@ -166,7 +166,7 @@ template <typename Iterator> void slideshow_from_folder(Iterator iter);
 //Turn all images in a folder into a slideshow for each subfolder
 template <typename Iterator> void crop_folder(Iterator iter);
 template <typename Iterator> void resize_folder(Iterator iter);
-template <typename Iterator> void remove_duplicates_from_folder(Iterator iter);
+template <typename Iterator> void remove_duplicates(Iterator iter);
 void decompile_slideshow(fs::directory_entry file);
 
 //void add_image_for_length(VideoWriter& writer, const Mat& image) {
@@ -228,58 +228,6 @@ void decompile_slideshow(fs::directory_entry file);
 //
 //	return;
 //}
-//
-//void recompile_path() {
-//	unordered_set<string> hashes;
-//
-//	int frames = 0, folders = 0, loops = 0, movies = 0;
-//	Mat frame;
-//
-//	VideoWriter writer;
-//	writer.open(enddir + "0.avi", CODEC_MP42, 1, Size(1920, 1080), true);
-//
-//	for (fs::directory_entry file : fs::recursive_directory_iterator(sourcedir)) {
-//		string filepath = file.path().string();
-//		string ext = file.path().extension().string();
-//		VideoCapture cap;
-//
-//		try {
-//			cap.open(filepath);
-//		} catch (exception e) {
-//			cout << e.what() << endl;
-//			continue;
-//		}
-//
-//		cap.read(frame);
-//		Mat newframe = crop_img(frame);
-//
-//		while (!newframe.empty()) {
-//			try {
-//				string hash = dhash_img(newframe);
-//				cout << hash << endl;
-//				if (hashes.find(hash) == hashes.end()) {
-//					hashes.insert(hash);
-//					writer.write(resize_img(newframe));
-//
-//					cout << loops << "\r";
-//
-//					loops++;
-//
-//					if (loops >= movie_limit) {
-//						movies++;
-//						loops = 0;
-//						writer.release();
-//						writer.open(enddir + to_string(movies) + ".avi", CODEC_MP42, 1, Size(1920, 1080), true);
-//					}
-//				} else {
-//					cout << "DUPE" << endl;
-//				}
-//			} catch (const exception e) {
-//				cout << e.what() << endl;
-//			}
-//		}
-//	}
-//}
 
 template <typename Iterator> void slideshow_from_folder(Iterator iter) {
 	if (!output_folder.has_value()) return;
@@ -328,7 +276,7 @@ template <typename Iterator> void crop_folder(Iterator iter) {
 	}
 }
 
-template <typename Iterator> void remove_duplicates_from_folder(Iterator iter) {
+template <typename Iterator> void remove_duplicates(Iterator iter) {
 	// ?????????????
 }
 
@@ -336,31 +284,25 @@ void decompile_slideshow(fs::directory_entry file) {
 	if (!file_is_anim(file)) return;
 	if (!output_folder.has_value()) return;
 
-	string enddir = output_folder.value();
-
-	int frames = 0, folders = 0;
-	Mat frame;
-
 	string filepath = file.path().string();
 	VideoCapture cap;
-	try {
-		cap.open(filepath);
-	} catch (const exception e) {
-		cout << e.what() << endl;
-		return;
-	}
+	cap.open(filepath);
+
+	string enddir = output_folder.value();
+
+	string last_hash = "";
+	int frames = 0;
+	Mat frame;
 
 	do {
-		if (frames % folder_limit == 0) {
-			frames = 0;
-			folders++;
-			string folder_path = enddir + to_string(folders) + "/";
-			try { CreateDirectoryA(folder_path.c_str(), NULL); } catch (const exception&) {}
-		}
-
 		cap.read(frame);
-		string save_path = enddir + to_string(folders) + "/" + to_string(frames % folder_limit) + ".png";
-		cout << folders << " - " << frames << "\r";
+
+		string frame_hash = hash_img(frame);
+		if(frame_hash == last_hash) continue;
+		last_hash = frame_hash;
+
+		string save_path = enddir + to_string(frames) + ".png";
+		cout << frames << "\r";
 		imwrite(save_path, frame);
 
 		frames++;
@@ -423,8 +365,14 @@ int main(int argc, char* argv[]) {
 		} else {
 			resize_folder(fs::directory_iterator(input_folder));
 		}
-	} else if (mode_arg == "decompile") {
 	} else if (mode_arg == "duplicates") {
+		if (program["-r"] == true) {
+			remove_duplicates(fs::recursive_directory_iterator(input_folder));
+		} else {
+			remove_duplicates(fs::directory_iterator(input_folder));
+		}
+	} else if (mode_arg == "decompile") {
+		decompile_slideshow(fs::directory_entry(fs::path(input_folder)));
 	} else {
 		cerr << "Invalid Mode" << endl;
 		exit(1);
