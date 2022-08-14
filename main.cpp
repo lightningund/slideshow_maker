@@ -3,6 +3,7 @@
 #include <set>
 #include <string>
 #include <future>
+#include <bitset>
 #include <windows.h>
 #include <unordered_set>
 #include <opencv2/core.hpp>
@@ -15,23 +16,35 @@
 
 #define CODEC_MP42 VideoWriter::fourcc('M', 'P', '4', '2')
 
-typedef unsigned long long int hashtype;
-typedef unsigned short int smallint;
+typedef std::string str;
 
+namespace fs = std::filesystem;
 using namespace cv;
-using namespace std;
-namespace fs = filesystem;
 
-int img_length = 3, anim_length = 5;
+constexpr int hash_size{64};
+constexpr int hash_bits{hash_size * hash_size};
+typedef std::bitset<hash_bits> Hash;
 
-int des_width = 1920, des_height = 1080;
-float des_ratio = des_width / (float)des_height;
-int hash_size = 64, fps = 1;
+int img_length{3};
+int anim_length{5};
 
-optional<string> output_folder;
+int des_width{1920};
+int des_height{1080};
+double des_ratio{static_cast<double>(des_width) / des_height};
 
-string int_to_binary_string(int num) {
-	string binary = "";
+int fps{1};
+
+std::optional<std::string> output_folder;
+
+template <typename Iterator> void compile_folder(Iterator iter);
+//Turn all images in a folder into a slideshow for each subfolder
+template <typename Iterator> void crop_folder(Iterator iter);
+template <typename Iterator> void resize_folder(Iterator iter);
+template <typename Iterator> void remove_duplicates(Iterator iter);
+void decompile_slideshow(fs::directory_entry file);
+
+str int_to_binary_string(int num) {
+	str binary{};
 	for (int mask = 1; mask < num; mask <<= 1) {
 		binary = ((mask & num) ? "1" : "0") + binary;
 	}
@@ -39,37 +52,37 @@ string int_to_binary_string(int num) {
 	return binary;
 }
 
-string intToHex(hashtype w, int hexLen) {
-	static const char* digits = "0123456789ABCDEF";
-	string rc(hexLen, '0');
+str intToHex(unsigned long long w, int hexLen) {
+	static const char* digits{"0123456789ABCDEF"};
+	str rc(hexLen, '0');
 	for (int i = 0, j = (hexLen - 1) * 4; i < hexLen; ++i, j -= 4) {
 		rc[i] = digits[(w >> j) & 0x0f];
 	}
 	return rc;
 }
 
-string binaryToHex(string bin) {
-	static const char* digits = "0123456789ABCDEF";
-	string hex = "";
-	int startoff = 4 - bin.length() % 4;
+str binaryToHex(str bin) {
+	static const char* digits{"0123456789ABCDEF"};
+	str hex{};
+	int startoff{4 - bin.length() % 4};
 	for (int i = startoff; i < bin.length(); i += 4) {
 		hex += digits[stoi(bin.substr(i, 4))];
 	}
 	return hex;
 }
 
-string hash_img(Mat src_img) {
-	Mat gray;
+Hash hash_img(Mat src_img) {
+	Mat gray{};
 	cvtColor(src_img, gray, COLOR_BGR2GRAY);
-	Mat smallGray;
+	Mat smallGray{};
 	resize(gray, smallGray, Size(hash_size + 1, hash_size));
-	Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
-	string hash = "";
-	for (int y = 0; y < hash_size; y++) {
-		for (int x = 0; x < hash_size; x++) {
+	//Mat hashImg = Mat::zeros(hash_size, hash_size, CV_8UC1);
+	Hash hash{};
+	for (int y = 0; y < hash_size; y ++) {
+		for (int x = 0; x < hash_size; x ++) {
 			bool bigger = smallGray.at<int>(x, y) > smallGray.at<int>(x + 1, y);
-			hash += bigger ? "1" : "0";
-			hashImg.at<int>(Point(x, y)) = bigger ? 255 : 0;
+			hash[y * hash_size + x] = bigger;
+			//hashImg.at<int>(Point(x, y)) = bigger ? 255 : 0;
 		}
 	}
 
@@ -86,11 +99,11 @@ Mat crop_img(Mat img) {
 	cvtColor(big_img, gray, COLOR_BGR2GRAY); // Convert the base image into grayscale
 	Mat thresh;
 	threshold(gray, thresh, 5, 255, THRESH_BINARY); // Run the grayscale through a boolean function (essentially)
-	vector<vector<Point>> contours;
+	std::vector<std::vector<Point>> contours;
 	findContours(thresh, contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE); // Find the contours (???)
 	Rect coords(0, 0, 0, 0);
-	for (int i = 0; i < contours.size(); i++) {
-		vector<Point> cnt = contours[i];
+	for (int i = 0; i < contours.size(); i ++) {
+		std::vector<Point> cnt = contours[i];
 		Rect bounds = boundingRect(cnt);
 		if (bounds.width > coords.width && bounds.height > coords.height) {
 			coords = bounds;
@@ -110,20 +123,20 @@ Mat resize_img(Mat img) {
 
 	if (w == des_width && h == des_height) return img;
 
-	float r = w / (float)h;
+	double r = w / (double)h;
 	int nw = des_width, nh = des_height;
 
 	if (r < des_ratio) {
-		nw = w * (des_height / (float)h);
+		nw = static_cast<int>(des_height * r);
 	} else if (r > des_ratio) {
-		nh = h * (des_height / (float)w);
+		nh = static_cast<int>(des_height / r);
 	} else {
 		resize(img, img, Size(des_width, des_height));
 		return img;
 	}
 
-	float xo = (des_width - nw) / 2.0;
-	float yo = (des_height - nh) / 2.0;
+	double xo = (des_width - nw) / 2.0;
+	double yo = (des_height - nh) / 2.0;
 
 	resize(img, img, Size(nw, nh));
 	Mat new_img = Mat::zeros(des_height, des_width, CV_8UC3);
@@ -133,41 +146,34 @@ Mat resize_img(Mat img) {
 }
 
 void crop_file(fs::directory_entry file) {
-	string filepath = file.path().string();
-	string writepath = filepath;
+	str filepath = file.path().string();
+	str writepath = filepath;
 	if (output_folder.has_value()) writepath = output_folder.value() + "/" + file.path().stem().string() + ".png";
 	imwrite(writepath, crop_img(imread(filepath)));
 }
 
 void resize_file(fs::directory_entry file) {
-	string filepath = file.path().string();
-	string writepath = filepath;
+	str filepath = file.path().string();
+	str writepath = filepath;
 	if (output_folder.has_value()) writepath = output_folder.value() + "/" + file.path().stem().string() + ".png";
-	cout << filepath << " to " << writepath << endl;
+	std::cout << filepath << " to " << writepath << "\n";
 	imwrite(writepath, resize_img(imread(filepath)));
 }
 
-bool endswith_list(string str, initializer_list<string> lst) {
-	for (string substr : lst) {
-		if (str.ends_with(substr)) return true;
+bool endswith_list(str string, std::initializer_list<str> lst) {
+	for (str substr : lst) {
+		if (string.ends_with(substr)) return true;
 		return false;
 	}
 }
 
 bool file_is_img(fs::path file) {
-	return (set<string>{ ".jpg", ".jpeg", ".bmp", ".png" }.contains(file.extension().string()));
+	return (std::set<str>{".jpg", ".jpeg", ".bmp", ".png"}.contains(file.extension().string()));
 }
 
 bool file_is_anim(fs::path file) {
-	return (set<string>{ ".mov", ".mp4", ".avi" }.contains(file.extension().string()));
+	return (std::set<str>{".mov", ".mp4", ".avi"}.contains(file.extension().string()));
 }
-
-template <typename Iterator> void slideshow_from_folder(Iterator iter);
-//Turn all images in a folder into a slideshow for each subfolder
-template <typename Iterator> void crop_folder(Iterator iter);
-template <typename Iterator> void resize_folder(Iterator iter);
-template <typename Iterator> void remove_duplicates(Iterator iter);
-void decompile_slideshow(fs::directory_entry file);
 
 //void add_image_for_length(VideoWriter& writer, const Mat& image) {
 //	for (int i = 0; i < img_length * fps; i++) {
@@ -229,21 +235,21 @@ void decompile_slideshow(fs::directory_entry file);
 //	return;
 //}
 
-template <typename Iterator> void slideshow_from_folder(Iterator iter) {
+template <typename Iterator> void compile_folder(Iterator iter) {
 	if (!output_folder.has_value()) return;
 
-	string enddir = output_folder.value();
+	str enddir = output_folder.value();
 
 	VideoWriter writer;
 
-	string mov_name = "movie";
+	str mov_name = "movie";
 
 	writer.open(enddir + mov_name + ".avi", CODEC_MP42, 1, Size(1920, 1080));
 
 	for (fs::directory_entry file : iter) {
 		if (!file_is_img(file)) continue;
 
-		string filepath = file.path().string();
+		str filepath = file.path().string();
 
 		try {
 			Mat img = imread(filepath);
@@ -251,12 +257,14 @@ template <typename Iterator> void slideshow_from_folder(Iterator iter) {
 			remove(filepath.c_str());
 		} catch (Exception e) {}
 	}
+
+	writer.release();
 }
 
 template <typename Iterator> void resize_folder(Iterator iter) {
-	vector<future<void>> futures;
+	std::vector<std::future<void>> futures;
 	for (fs::directory_entry file : iter) {
-		if(file_is_img(file)) futures.push_back(async(crop_file, file));
+		if(file_is_img(file)) futures.push_back(std::async(crop_file, file));
 	}
 
 	for (auto& e : futures) {
@@ -265,10 +273,10 @@ template <typename Iterator> void resize_folder(Iterator iter) {
 }
 
 template <typename Iterator> void crop_folder(Iterator iter) {
-	vector<future<void>> futures;
+	std::vector<std::future<void>> futures;
 
 	for (fs::directory_entry file : iter) {
-		if (file_is_img(file)) futures.push_back(async(resize_file, file));
+		if (file_is_img(file)) futures.push_back(std::async(resize_file, file));
 	}
 
 	for (auto& e : futures) {
@@ -278,34 +286,36 @@ template <typename Iterator> void crop_folder(Iterator iter) {
 
 template <typename Iterator> void remove_duplicates(Iterator iter) {
 	// ?????????????
+	// I'll figure this out at some point
+	// Probably
 }
 
 void decompile_slideshow(fs::directory_entry file) {
 	if (!file_is_anim(file)) return;
 	if (!output_folder.has_value()) return;
 
-	string filepath = file.path().string();
+	str filepath = file.path().string();
 	VideoCapture cap;
 	cap.open(filepath);
 
-	string enddir = output_folder.value();
+	str enddir = output_folder.value();
 
-	string last_hash = "";
+	Hash last_hash{};
 	int frames = 0;
 	Mat frame;
 
 	do {
 		cap.read(frame);
 
-		string frame_hash = hash_img(frame);
+		Hash frame_hash{hash_img(frame)};
 		if(frame_hash == last_hash) continue;
 		last_hash = frame_hash;
 
-		string save_path = enddir + to_string(frames) + ".png";
-		cout << frames << "\r";
+		str save_path = enddir + std::to_string(frames) + ".png";
+		std::cout << frames << "\r";
 		imwrite(save_path, frame);
 
-		frames++;
+		frames ++;
 	} while (!frame.empty());
 }
 
@@ -314,7 +324,7 @@ int main(int argc, char* argv[]) {
 
 	program.add_argument("-m", "--mode")
 		.help("Specify the operating mode. Default: compile.\n\tcompile: Create slideshow from images\n\tcrop: Crop all images\n\tresize: Resize all images to specified size\n\tdecompile: Split movie into frames\n\tduplicates:Remove all identical images")
-		.default_value(string("compile"));
+		.default_value(str("compile"));
 	
 	program.add_argument("-i", "--input")
 		.help("Specify absolute path to the input folder")
@@ -340,19 +350,24 @@ int main(int argc, char* argv[]) {
 
 	try {
 		program.parse_args(argc, argv);
-	} catch (const runtime_error& err) {
-		cerr << err.what() << endl;
-		cerr << program;
+	} catch (const std::runtime_error& err) {
+		std::cerr << err.what() << "\n";
+		std::cerr << program;
 		exit(1);
 	}
 
-	output_folder = program.present<string>("-o");
+	output_folder = program.present<str>("-o");
 
-	string input_folder = program.get("-i");
+	str input_folder = program.get("-i");
 
-	string mode_arg = program.get("-m");
+	str mode_arg = program.get("-m");
 
 	if (mode_arg == "compile") {
+		if (program["-r"] == true) {
+			compile_folder(fs::recursive_directory_iterator(input_folder));
+		} else {
+			compile_folder(fs::directory_iterator(input_folder));
+		}
 	} else if (mode_arg == "crop") {
 		if (program["-r"] == true) {
 			crop_folder(fs::recursive_directory_iterator(input_folder));
@@ -374,7 +389,7 @@ int main(int argc, char* argv[]) {
 	} else if (mode_arg == "decompile") {
 		decompile_slideshow(fs::directory_entry(fs::path(input_folder)));
 	} else {
-		cerr << "Invalid Mode" << endl;
+		std::cerr << "Invalid Mode\n";
 		exit(1);
 	}
 
